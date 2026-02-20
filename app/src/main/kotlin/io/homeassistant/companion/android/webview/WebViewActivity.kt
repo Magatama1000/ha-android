@@ -496,6 +496,9 @@ class WebViewActivity :
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     webViewInitialized.value = true
+                    // Reset User-Agent after navigating away from Google authentication
+                    resetUserAgentIfNeeded(view, url)
+
                     if (clearHistory) {
                         webView.clearHistory()
                         clearHistory = false
@@ -614,6 +617,15 @@ class WebViewActivity :
                                     startActivity(intent)
                                 }
                                 return true
+                            } else if (isSsoAuthenticationDomain(it) || isCloudflareAuthenticationPath(it)) {
+                                // Allow Cloudflare Access and Google authentication domains to be loaded in WebView
+                                Timber.d("SSO authentication domain detected, allowing in WebView: $it")
+                                adjustUserAgentIfNeeded(view, it)
+                                return false
+                            } else if (isExternalAuthCallback(it, webView.url.toString())) {
+                                // Allow external_auth callback to be processed in WebView
+                                Timber.d("External auth callback detected, allowing in WebView: $it")
+                                return false
                             } else if (!webView.url.toString().contains(it)) {
                                 Timber.d("Launching browser")
                                 val browserIntent = Intent(Intent.ACTION_VIEW, it.toUri())
@@ -2175,6 +2187,91 @@ class WebViewActivity :
                     presenter.setActiveServer(it)
                 }
                 intent.removeExtra(EXTRA_SERVER)
+            }
+        }
+    }
+
+    /**
+     * Checks if the given URL is from an SSO authentication domain that should be handled within the WebView.
+     * Supports:
+     * - Cloudflare Access (*.cloudflareaccess.com)
+     * - Google authentication (accounts.google.com)
+     *
+     * @param url the URL to check
+     * @return true if the URL is from an SSO authentication domain
+     */
+    private fun isSsoAuthenticationDomain(url: String): Boolean {
+        return url.contains("cloudflareaccess.com") || url.contains("accounts.google.com")
+    }
+
+    /**
+     * Checks if the given URL path is related to Cloudflare Access authentication.
+     * Supports:
+     * - /cdn-cgi/access/authorized - Cloudflare Access authorization callback
+     * - /cdn-cgi/access/login - Cloudflare Access login
+     * - /cdn-cgi/access/logout - Cloudflare Access logout
+     *
+     * @param url the URL to check
+     * @return true if the URL is a Cloudflare Access authentication path
+     */
+    private fun isCloudflareAuthenticationPath(url: String): Boolean {
+        return url.contains("/cdn-cgi/access/")
+    }
+
+    /**
+     * Checks if the given URL is an external authentication callback from Home Assistant.
+     * The URL contains the `external_auth=1` parameter and is on the same domain as the WebView's current URL.
+     *
+     * @param url the URL to check
+     * @param currentWebViewUrl the current URL in the WebView
+     * @return true if the URL is an external auth callback on the same domain
+     */
+    private fun isExternalAuthCallback(url: String, currentWebViewUrl: String?): Boolean {
+        if (!url.contains("external_auth=1")) return false
+
+        // Check if the URL is on the same domain as the current WebView URL
+        return try {
+            val urlUri = url.toUri()
+            val currentUri = currentWebViewUrl?.toUri()
+
+            currentUri != null && urlUri.host == currentUri.host && urlUri.scheme == currentUri.scheme
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to parse URLs for external_auth check")
+            false
+        }
+    }
+
+    /**
+     * Adjusts the User-Agent for Google authentication to remove the WebView identifier.
+     * This helps Google's authentication flow work properly within the WebView.
+     *
+     * @param webView the WebView instance
+     * @param url the URL being loaded
+     */
+    private fun adjustUserAgentIfNeeded(webView: android.webkit.WebView?, url: String) {
+        if (url.contains("accounts.google.com") && webView != null) {
+            val originalUserAgent = android.webkit.WebSettings.getDefaultUserAgent(this)
+            // Remove "; wv" from the user agent string if present
+            val adjustedUserAgent = originalUserAgent.replace("; wv", "")
+            webView.settings.userAgentString = adjustedUserAgent
+            Timber.d("User-Agent adjusted for Google authentication: $adjustedUserAgent")
+        }
+    }
+
+    /**
+     * Resets the User-Agent to default when navigating away from Google authentication.
+     *
+     * @param webView the WebView instance
+     * @param url the URL being loaded
+     */
+    private fun resetUserAgentIfNeeded(webView: android.webkit.WebView?, url: String?) {
+        if (webView != null && url != null && !url.contains("accounts.google.com")) {
+            // Reset to default user agent (null will use the default)
+            val currentUserAgent = webView.settings.userAgentString
+            if (currentUserAgent != null && !currentUserAgent.contains("; wv")) {
+                // If user agent was adjusted (doesn't contain "; wv"), reset it
+                webView.settings.userAgentString = android.webkit.WebSettings.getDefaultUserAgent(this)
+                Timber.d("User-Agent reset to default after leaving Google authentication")
             }
         }
     }
