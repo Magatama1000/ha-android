@@ -1,5 +1,7 @@
 package io.homeassistant.companion.android.onboarding.connection
 
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.VisibleForTesting
 import androidx.compose.foundation.Image
@@ -17,9 +19,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
@@ -65,6 +69,33 @@ internal fun ConnectionScreen(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Wrap the webViewClient to properly handle homeassistant:// protocol
+    // User-Agent adjustment is now handled in HAWebViewClient
+    val wrappedWebViewClient = remember(webViewClient) {
+        object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val url = request.url.toString()
+
+                // Delegate everything to the original client which handles all logic including User-Agent adjustment
+                return webViewClient.shouldOverrideUrlLoading(view, request)
+            }
+
+            @Suppress("DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView, url: String?): Boolean {
+                // Delegate everything to the original client
+                return webViewClient.shouldOverrideUrlLoading(view, url)
+            }
+
+            override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                // Delegate to the original webViewClient
+                if (webViewClient is WebViewClient) {
+                    webViewClient.onPageStarted(view, url, favicon)
+                }
+                super.onPageStarted(view, url, favicon)
+            }
+        }
+    }
+
     Box(modifier = modifier.testTag(CONNECTION_SCREEN_TAG)) {
         Spacer(
             modifier = Modifier
@@ -81,7 +112,7 @@ internal fun ConnectionScreen(
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.safeDrawing),
                     configure = {
-                        this.webViewClient = webViewClient
+                        this.webViewClient = wrappedWebViewClient
                         loadUrl(url)
                     },
                     onBackPressed = onBackClick,

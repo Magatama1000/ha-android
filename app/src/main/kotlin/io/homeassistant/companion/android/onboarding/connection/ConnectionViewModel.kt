@@ -168,6 +168,10 @@ internal class ConnectionViewModel @VisibleForTesting constructor(
                 Timber.w("Auth code is missing from the auth callback")
                 false // Not intercepted: Auth code missing
             }
+        } else if (isSsoAuthenticationDomain(url.toString()) || isCloudflareAuthenticationPath(url.toString())) {
+            // Allow SSO authentication (Cloudflare Access, Google login) within the WebView
+            Timber.d("SSO authentication domain detected, allowing in WebView: $url")
+            false // Not intercepted: Allow in WebView
         } else if (url.host != rawUri.host) {
             Timber.d("$url is not from the server, opening it on external browser.")
             viewModelScope.launch {
@@ -177,6 +181,33 @@ internal class ConnectionViewModel @VisibleForTesting constructor(
         } else {
             false // Default: Not intercepted
         }
+    }
+
+    /**
+     * Checks if the given URL is from an SSO authentication domain that should be handled within the WebView.
+     * Supports:
+     * - Cloudflare Access (*.cloudflareaccess.com)
+     * - Google authentication (accounts.google.com)
+     *
+     * @param url the URL to check
+     * @return true if the URL is from an SSO authentication domain
+     */
+    private fun isSsoAuthenticationDomain(url: String): Boolean {
+        return url.contains("cloudflareaccess.com") || url.contains("accounts.google.com")
+    }
+
+    /**
+     * Checks if the given URL path is related to Cloudflare Access authentication.
+     * Supports:
+     * - /cdn-cgi/access/authorized - Cloudflare Access authorization callback
+     * - /cdn-cgi/access/login - Cloudflare Access login
+     * - /cdn-cgi/access/logout - Cloudflare Access logout
+     *
+     * @param url the URL to check
+     * @return true if the URL is a Cloudflare Access authentication path
+     */
+    private fun isCloudflareAuthenticationPath(url: String): Boolean {
+        return url.contains("/cdn-cgi/access/")
     }
 
     private fun onError(error: FrontendConnectionError) {

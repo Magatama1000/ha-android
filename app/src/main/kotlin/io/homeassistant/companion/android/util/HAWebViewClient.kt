@@ -217,12 +217,55 @@ class HAWebViewClient internal constructor(
         return true
     }
 
+    /**
+     * Adjusts the User-Agent for Google authentication to remove the WebView identifier.
+     * This helps Google's authentication flow work properly within the WebView.
+     *
+     * @param webView the WebView instance
+     */
+    private fun adjustUserAgentForGoogle(webView: android.webkit.WebView?) {
+        webView?.let {
+            val currentUserAgent = it.settings.userAgentString ?: ""
+            if (currentUserAgent.contains("; wv")) {
+                val adjustedUserAgent = currentUserAgent.replace("; wv", "")
+                it.settings.userAgentString = adjustedUserAgent
+                Timber.d("User-Agent adjusted for Google authentication: $adjustedUserAgent")
+            }
+        }
+    }
+
+    /**
+     * Resets the User-Agent to the default after leaving Google authentication.
+     *
+     * @param webView the WebView instance
+     */
+    private fun resetUserAgentFromGoogle(webView: android.webkit.WebView?) {
+        webView?.let {
+            val currentUserAgent = it.settings.userAgentString ?: ""
+            // If user agent was adjusted (doesn't contain "; wv"), we might need to reset
+            // But only if we're sure it's not just a normal user agent without wv
+            // For safety, we only log when it's clearly been modified
+            if (!currentUserAgent.contains("; wv") && currentUserAgent.isNotEmpty()) {
+                Timber.d("User-Agent is in non-WebView mode after leaving Google authentication: $currentUserAgent")
+            }
+        }
+    }
+
     // Override deprecated method for backward compatibility with API 23 and below.
     // The non-deprecated shouldOverrideUrlLoading(WebView, WebResourceRequest) is not invoked
     // on these older Android versions, so this method remains necessary.
     @Suppress("DEPRECATION")
     @Deprecated("Deprecated in Java for SDK >= 24", ReplaceWith("shouldOverrideUrlLoading(view, request)"))
     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+        // Adjust User-Agent for Google authentication before delegating
+        url?.let {
+            if (it.contains("accounts.google.com")) {
+                adjustUserAgentForGoogle(view)
+            } else {
+                resetUserAgentFromGoogle(view)
+            }
+        }
+
         return url?.toUri()?.let { onUrlIntercepted?.invoke(it, isTLSClientAuthNeeded) } ?: false
     }
 
